@@ -48,4 +48,7 @@ Thumbs.db
 *.m4a
 *.aiff
 *.json
-*.npy 
+*.npy
+
+# Secrets and configuration
+.streamlit/ 
