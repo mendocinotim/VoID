@@ -24,6 +24,7 @@ DEFAULT_CONFIG = {
     'UI_THEME': 'light',
     'AUTO_SAVE': True,
     'SAVE_INTERVAL': 300,  # seconds
+    'CHUNK_SIZE': 300,  # 5 minutes per chunk for large file processing
 }
 
 class Config:

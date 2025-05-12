@@ -24,6 +24,12 @@ class VoiceprintLibraryBuilder:
             embedding_size=self.config.get('EMBEDDING_SIZE')
         )
     
+    def parse_time(self, timestr):
+        # Format: "HH:MM:SS,mmm"
+        h, m, s_ms = timestr.split(":")
+        s, ms = s_ms.split(",")
+        return int(h) * 3600 + int(m) * 60 + int(s) + int(ms) / 1000
+
     def extract_segments_from_whisper(self, whisper_file: str) -> List[Dict]:
         """
         Extract voice segments from a whisper file.
@@ -45,12 +51,12 @@ class VoiceprintLibraryBuilder:
                 whisper_data = json.load(f)
             
             segments = []
-            for segment in whisper_data.get('segments', []):
-                if 'speaker' in segment:  # Only include segments with speaker labels
+            for segment in whisper_data.get('lines', []):
+                if 'speakerDesignation' in segment:
                     segments.append({
-                        'speaker': segment['speaker'],
-                        'start': segment['start'],
-                        'end': segment['end'],
+                        'speaker': segment['speakerDesignation'],
+                        'start': self.parse_time(segment['startTime']),
+                        'end': self.parse_time(segment['endTime']),
                         'text': segment.get('text', '')
                     })
             
