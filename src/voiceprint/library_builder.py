@@ -30,26 +30,58 @@ class VoiceprintLibraryBuilder:
         s, ms = s_ms.split(",")
         return int(h) * 3600 + int(m) * 60 + int(s) + int(ms) / 1000
 
+    def extract_segments_from_js_transcript(self, js_file: str) -> List[Dict]:
+        """
+        Extract speaker segments from a .js (JSON array) transcript file.
+        """
+        try:
+            with open(js_file, 'r', encoding='utf-8') as f:
+                data = json.load(f)
+            segments = []
+            for entry in data:
+                segments.append({
+                    'speaker': entry.get('speaker', 'Unknown'),
+                    'start': None,
+                    'end': None,
+                    'text': entry.get('text', '')
+                })
+            return segments
+        except Exception as e:
+            logger.error(f"Error extracting segments from js transcript: {str(e)}")
+            raise
+
     def extract_segments_from_whisper(self, whisper_file: str) -> List[Dict]:
         """
-        Extract voice segments from a whisper file.
-        
+        Extract voice segments from a whisper file or .js transcript.
         Args:
-            whisper_file: Path to the whisper JSON file
-            
+            whisper_file: Path to the whisper JSON or JS file
         Returns:
             List of dictionaries containing segment information:
             {
                 'speaker': str,
-                'start': float,
-                'end': float,
+                'start': float or None,
+                'end': float or None,
                 'text': str
             }
         """
         try:
+            # Detect file type by extension or structure
+            if whisper_file.endswith('.js'):
+                return self.extract_segments_from_js_transcript(whisper_file)
             with open(whisper_file, 'r', encoding='utf-8') as f:
                 whisper_data = json.load(f)
-            
+            # If it's a list, treat as .js format
+            if isinstance(whisper_data, list):
+                segments = []
+                for entry in whisper_data:
+                    segments.append({
+                        'speaker': entry.get('speaker', 'Unknown'),
+                        'start': None,
+                        'end': None,
+                        'text': entry.get('text', '')
+                    })
+                return segments
+            # Otherwise, treat as MacWhisper JSON with 'lines'
             segments = []
             for segment in whisper_data.get('lines', []):
                 if 'speakerDesignation' in segment:
@@ -59,7 +91,6 @@ class VoiceprintLibraryBuilder:
                         'end': self.parse_time(segment['endTime']),
                         'text': segment.get('text', '')
                     })
-            
             return segments
         except Exception as e:
             logger.error(f"Error extracting segments from whisper file: {str(e)}")
