@@ -65,7 +65,7 @@ for chunk_idx in range(num_chunks):
             print(f"[{time.ctime()}]   Processing segment {i+1}/{len(segments)}: {start:.2f}s - {end:.2f}s")
             seg_audio = audio[int(start*sr):int(end*sr)]
             print(f"[{time.ctime()}]   Extracting voiceprint...")
-            features = preprocessor.extract_features(seg_audio, sr)
+            features = preprocessor.extract_features(seg_audio, sr, n_mfcc=40)
             embedding = extractor.extract_embedding(features)
             print(f"[{time.ctime()}]   Matching to known speakers...")
             speaker, confidence = matcher.find_best_match(embedding, database.get_voiceprints())
