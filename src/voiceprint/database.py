@@ -7,28 +7,31 @@ import pickle
 class VoiceprintDatabase:
     """Manages storage and retrieval of speaker voiceprints."""
     
-    def __init__(self, db_path: str):
+    def __init__(self, db_path=None):
         """
         Initialize the voiceprint database.
         
         Args:
             db_path: Path to the database directory
         """
-        self.db_path = db_path
-        self.embeddings_path = os.path.join(db_path, 'embeddings')
-        self.metadata_path = os.path.join(db_path, 'metadata.json')
-        
-        # Create database directory if it doesn't exist
-        os.makedirs(self.db_path, exist_ok=True)
-        os.makedirs(self.embeddings_path, exist_ok=True)
-        
-        # Load or create metadata
-        if os.path.exists(self.metadata_path):
-            with open(self.metadata_path, 'r') as f:
+        self.db_path = db_path or os.path.expanduser("~/.voice_diarization_db")
+        self.embeddings_dir = os.path.join(self.db_path, "embeddings")
+        self.metadata_file = os.path.join(self.db_path, "metadata.json")
+        self._ensure_dirs()
+        self._load_metadata()
+    
+    def _load_metadata(self):
+        """Load metadata from JSON file."""
+        if os.path.exists(self.metadata_file):
+            with open(self.metadata_file, 'r') as f:
                 self.metadata = json.load(f)
         else:
             self.metadata = {}
-            self._save_metadata()
+    
+    def _save_metadata(self):
+        """Save metadata to JSON file."""
+        with open(self.metadata_file, 'w') as f:
+            json.dump(self.metadata, f, indent=2)
     
     def add_voiceprint(self, 
                       speaker_name: str,
@@ -42,53 +45,50 @@ class VoiceprintDatabase:
             embedding: Speaker embedding
             metadata: Additional metadata about the voiceprint
         """
-        # Generate unique ID for the embedding
-        embedding_id = f"{speaker_name}_{len(self.metadata.get(speaker_name, []))}"
-        
-        # Save embedding
-        embedding_path = os.path.join(self.embeddings_path, f"{embedding_id}.npy")
-        np.save(embedding_path, embedding)
-        
-        # Update metadata
         if speaker_name not in self.metadata:
             self.metadata[speaker_name] = []
-            
-        self.metadata[speaker_name].append({
-            'id': embedding_id,
-            'path': embedding_path,
-            'metadata': metadata or {}
-        })
         
+        # Generate unique filename for embedding
+        embedding_id = len(self.metadata[speaker_name])
+        embedding_path = os.path.join(self.embeddings_dir, f"{speaker_name}_{embedding_id}.npy")
+        
+        # Save embedding
+        np.save(embedding_path, embedding)
+        
+        # Save metadata
+        metadata_entry = {
+            'path': embedding_path,
+            'metadata': metadata or {},
+            'ignored': False  # Default to not ignored
+        }
+        self.metadata[speaker_name].append(metadata_entry)
         self._save_metadata()
     
-    def get_voiceprints(self, speaker_name: Optional[str] = None) -> Dict[str, List[np.ndarray]]:
+    def get_voiceprints(self, include_ignored=False) -> Dict[str, List[np.ndarray]]:
         """
         Get voiceprints from the database.
         
         Args:
-            speaker_name: Optional speaker name to filter by
+            include_ignored: Whether to include ignored voiceprints
             
         Returns:
             Dictionary mapping speaker names to lists of embeddings
         """
-        result = {}
+        voiceprints = {}
+        for speaker, entries in self.metadata.items():
+            if speaker not in voiceprints:
+                voiceprints[speaker] = []
+            
+            for entry in entries:
+                # Skip ignored entries unless explicitly requested
+                if not include_ignored and entry.get('ignored', False):
+                    continue
+                    
+                if os.path.exists(entry['path']):
+                    embedding = np.load(entry['path'])
+                    voiceprints[speaker].append(embedding)
         
-        if speaker_name:
-            if speaker_name in self.metadata:
-                embeddings = []
-                for entry in self.metadata[speaker_name]:
-                    embedding = np.load(entry['path'])
-                    embeddings.append(embedding)
-                result[speaker_name] = embeddings
-        else:
-            for name, entries in self.metadata.items():
-                embeddings = []
-                for entry in entries:
-                    embedding = np.load(entry['path'])
-                    embeddings.append(embedding)
-                result[name] = embeddings
-                
-        return result
+        return voiceprints
     
     def remove_voiceprint(self, speaker_name: str, embedding_id: str) -> None:
         """
@@ -123,7 +123,22 @@ class VoiceprintDatabase:
         """
         return list(self.metadata.keys())
     
-    def _save_metadata(self) -> None:
-        """Save metadata to disk."""
-        with open(self.metadata_path, 'w') as f:
-            json.dump(self.metadata, f, indent=2) 
+    def mark_as_ignored(self, speaker, indices):
+        """Mark specific voiceprints as ignored."""
+        if speaker in self.metadata:
+            for idx in indices:
+                if 0 <= idx < len(self.metadata[speaker]):
+                    self.metadata[speaker][idx]['ignored'] = True
+            self._save_metadata()
+    
+    def mark_as_unignored(self, speaker, indices):
+        """Mark specific voiceprints as not ignored."""
+        if speaker in self.metadata:
+            for idx in indices:
+                if 0 <= idx < len(self.metadata[speaker]):
+                    self.metadata[speaker][idx]['ignored'] = False
+            self._save_metadata()
+    
+    def _ensure_dirs(self):
+        """Ensure database directories exist."""
+        os.makedirs(self.embeddings_dir, exist_ok=True) 

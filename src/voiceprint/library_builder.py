@@ -11,6 +11,7 @@ from collections import defaultdict
 from src.audio.audio_loader import AudioLoader
 from src.audio.audio_preprocessing import AudioPreprocessor
 from src.voiceprint.extractor import VoiceprintExtractor
+from src.voiceprint.database import VoiceprintDatabase
 
 logger = logging.getLogger(__name__)
 
@@ -25,6 +26,8 @@ class VoiceprintLibraryBuilder:
         self.extractor = VoiceprintExtractor(
             embedding_size=self.config.get('EMBEDDING_SIZE')
         )
+        # Initialize the central database
+        self.db = VoiceprintDatabase(db_path=self.config.get('DB_PATH'))
     
     def parse_time(self, timestr):
         # Format: "HH:MM:SS,mmm"
@@ -151,6 +154,10 @@ class VoiceprintLibraryBuilder:
                 voiceprints = []
                 
                 for segment in speaker_segs:
+                    # Skip segments with missing start/end
+                    if segment['start'] is None or segment['end'] is None:
+                        logger.warning(f"Skipping segment with missing start/end in {whisper_file}: {segment}")
+                        continue
                     # Extract audio segment
                     start_sample = int(segment['start'] * sr)
                     end_sample = int(segment['end'] * sr)
@@ -159,11 +166,22 @@ class VoiceprintLibraryBuilder:
                     # Extract voiceprint
                     voiceprint = self.extract_voiceprint(segment_audio, sr)
                     voiceprints.append(voiceprint)
+                    # Save to central database
+                    self.db.add_voiceprint(
+                        speaker_name=speaker,
+                        embedding=voiceprint,
+                        metadata={
+                            'whisper_file': whisper_file,
+                            'wav_file': wav_file,
+                            'start': segment['start'],
+                            'end': segment['end'],
+                            'text': segment.get('text', '')
+                        }
+                    )
                 
-                # Save voiceprints for this speaker
+                # Save voiceprints for this speaker (optional: local dir)
                 speaker_dir = os.path.join(output_dir, speaker)
                 os.makedirs(speaker_dir, exist_ok=True)
-                
                 for i, voiceprint in enumerate(voiceprints):
                     output_file = os.path.join(speaker_dir, f"voiceprint_{i}.npy")
                     np.save(output_file, voiceprint)
@@ -262,7 +280,9 @@ class VoiceprintLibraryBuilder:
                     break
             if not wav_file or not transcript_file:
                 continue  # Skip if missing
-            # Extract segments
+            # Call build_library to extract and save voiceprints
+            self.build_library(transcript_file, wav_file, ref_path)
+            # Extract segments for summary
             segments = self.extract_segments_from_whisper(transcript_file)
             for seg in segments:
                 speaker = seg['speaker']
