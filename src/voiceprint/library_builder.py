@@ -5,6 +5,8 @@ from typing import Dict, List, Tuple
 import soundfile as sf
 import logging
 from pathlib import Path
+import pandas as pd
+from collections import defaultdict
 
 from src.audio.audio_loader import AudioLoader
 from src.audio.audio_preprocessing import AudioPreprocessor
@@ -218,4 +220,66 @@ class VoiceprintLibraryBuilder:
                 logger.error(f"Error processing {whisper_file}: {str(e)}")
                 continue
         
-        return voiceprint_library 
+        return voiceprint_library
+
+    def batch_process_range(self, root_dir: str, start_ref: str, end_ref: str):
+        """
+        Batch process a range of reference directories.
+        Returns summary tables as described by the user.
+        """
+        # Get sorted list of directories
+        all_dirs = sorted([d for d in os.listdir(root_dir) if os.path.isdir(os.path.join(root_dir, d))])
+        # Find start and end indices
+        try:
+            start_idx = all_dirs.index(start_ref)
+            end_idx = all_dirs.index(end_ref)
+        except ValueError as e:
+            raise Exception(f"Start or end reference not found: {e}")
+        selected_dirs = all_dirs[start_idx:end_idx+1]
+
+        summary_rows = []  # For first table
+        speaker_sample_counts = defaultdict(int)
+        speaker_file_counts = defaultdict(set)
+
+        for ref_dir in selected_dirs:
+            ref_path = os.path.join(root_dir, ref_dir)
+            audio_dir = os.path.join(ref_path, 'AUDIO')
+            json_dir = os.path.join(ref_path, 'JSON')
+            # Find .wav file
+            wav_file = None
+            for f in os.listdir(audio_dir):
+                if f.lower().endswith('.wav'):
+                    wav_file = os.path.join(audio_dir, f)
+                    break
+            # Find transcript file (.json, .js, .json.js)
+            transcript_file = None
+            for ext in ['.json', '.js', '.json.js']:
+                for f in os.listdir(json_dir):
+                    if f.lower().endswith(ext):
+                        transcript_file = os.path.join(json_dir, f)
+                        break
+                if transcript_file:
+                    break
+            if not wav_file or not transcript_file:
+                continue  # Skip if missing
+            # Extract segments
+            segments = self.extract_segments_from_whisper(transcript_file)
+            for seg in segments:
+                speaker = seg['speaker']
+                summary_rows.append({'RefDir': ref_dir, 'SpeakerName': speaker})
+                speaker_sample_counts[speaker] += 1
+                speaker_file_counts[speaker].add(ref_dir)
+        # First table: one row per reference dir processed
+        df1 = pd.DataFrame(summary_rows)
+        df1 = df1.sort_values(['RefDir', 'SpeakerName']).reset_index(drop=True)
+        # Second table: one row per speaker
+        df2 = pd.DataFrame([
+            {
+                'SpeakerName': speaker,
+                'TotalSamples': speaker_sample_counts[speaker],
+                'TotalFiles': len(speaker_file_counts[speaker])
+            }
+            for speaker in speaker_sample_counts
+        ])
+        df2 = df2.sort_values(['SpeakerName']).reset_index(drop=True)
+        return df1, df2 
